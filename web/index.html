@@ -241,6 +241,8 @@ async function startListening() {
     const data = JSON.parse(event.data);
     if (data.status === "silence") {
       setDisplay("idle", null, 0);
+    } else if (data.status === "error") {
+      setStatus("Erreur serveur : " + (data.detail || "inconnue"));
     } else if (data.name) {
       setDisplay("known", data.name, data.score);
     } else {
