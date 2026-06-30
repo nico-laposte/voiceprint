@@ -364,28 +364,10 @@ els.recordEnrollBtn.addEventListener("click", async () => {
       formData.append("file", blob, `enroll.${extension}`);
 
       els.enrollStatus.textContent = "Envoi au serveur...";
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => {
-        controller.abort();
-      }, 55000);
-      let res;
-      try {
-        res = await fetch(`${SERVER_HTTP}/enroll?name=${encodeURIComponent(name)}`, {
-          method: "POST",
-          body: formData,
-          signal: controller.signal,
-        });
-      } catch (fetchErr) {
-        if (fetchErr.name === "AbortError") {
-          els.enrollStatus.textContent = "Délai dépassé — le serveur se réchauffe, réessaie dans 30s.";
-        } else {
-          els.enrollStatus.textContent = "Erreur réseau : " + fetchErr.message;
-        }
-        els.recordEnrollBtn.disabled = false;
-        return;
-      } finally {
-        clearTimeout(timeoutId);
-      }
+      const res = await fetch(`${SERVER_HTTP}/enroll?name=${encodeURIComponent(name)}`, {
+        method: "POST",
+        body: formData,
+      });
       const data = await res.json();
       if (res.ok) {
         els.enrollStatus.textContent = `${name} enrôlé (${data.duration_s}s d'audio analysées).`;
