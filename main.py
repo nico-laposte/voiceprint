@@ -120,6 +120,19 @@ async def enroll(name: str, file: UploadFile = File(...)):
     return {"name": name, "duration_s": round(duration, 2), "embedding_dim": len(embedding)}
 
 
+@app.get("/debug")
+async def debug():
+    """Diagnostic rapide : état du modèle et des enrôlements."""
+    import torchaudio
+    return {
+        "enrolled": list(identifier.enrolled.keys()),
+        "threshold": SIMILARITY_THRESHOLD,
+        "window_seconds": WINDOW_SECONDS,
+        "hop_seconds": HOP_SECONDS,
+        "audio_backends": torchaudio.list_audio_backends(),
+    }
+
+
 @app.get("/speakers")
 async def list_speakers():
     return {"speakers": list(identifier.enrolled.keys())}
@@ -157,10 +170,11 @@ async def ws_identify(websocket: WebSocket):
                 buffer = buffer[HOP_SAMPLES:]
 
                 try:
-                    has_voice = vad.has_speech(window)
+                    has_voice = True  # VAD désactivée temporairement pour diagnostic
+                    # has_voice = vad.has_speech(window)
                 except Exception as e:
                     print(f"[ws_identify] erreur VAD: {e}")
-                    has_voice = True  # en cas d'erreur VAD, on tente quand même l'inférence
+                    has_voice = True
 
                 if not has_voice:
                     recent_results.append(None)
