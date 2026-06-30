@@ -1,1 +1,368 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Qui parle ?</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --accent: #3fb950;
+    --warn: #d29922;
+    --idle: #484f58;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  .container { max-width: 480px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 20px; font-weight: 600; margin: 0 0 4px; }
+  .subtitle { color: var(--muted); font-size: 13px; margin: 0 0 24px; }
 
+  /* Carte d'affichage principal du résultat live */
+  .display-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 32px 20px;
+    text-align: center;
+    margin-bottom: 20px;
+    min-height: 140px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    transition: border-color 0.3s ease;
+  }
+  .display-card.active { border-color: var(--accent); }
+  .speaker-name {
+    font-size: 32px;
+    font-weight: 700;
+    margin: 0 0 6px;
+    transition: color 0.2s ease;
+  }
+  .speaker-name.unknown { color: var(--muted); }
+  .speaker-name.idle { color: var(--idle); }
+  .speaker-name.known { color: var(--accent); }
+  .score-line { color: var(--muted); font-size: 13px; margin: 0; font-family: ui-monospace, monospace; }
+
+  .controls { display: flex; gap: 10px; margin-bottom: 24px; }
+  button {
+    flex: 1;
+    padding: 14px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--text);
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #04140a; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.danger { background: #f85149; border-color: #f85149; color: #1a0303; }
+
+  .status-line {
+    font-size: 12px;
+    color: var(--muted);
+    text-align: center;
+    margin-bottom: 24px;
+    font-family: ui-monospace, monospace;
+  }
+
+  section { margin-bottom: 28px; }
+  h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 0 0 12px; }
+
+  .enroll-row { display: flex; gap: 8px; margin-bottom: 10px; }
+  input[type="text"] {
+    flex: 1;
+    padding: 12px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 15px;
+  }
+  .enroll-status { font-size: 13px; color: var(--muted); min-height: 18px; }
+
+  .speaker-list { display: flex; flex-direction: column; gap: 8px; }
+  .speaker-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 14px;
+  }
+  .speaker-item button {
+    flex: none;
+    padding: 6px 12px;
+    font-size: 13px;
+    background: transparent;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Qui parle ?</h1>
+  <p class="subtitle">Identification de voix en direct (ECAPA-TDNN)</p>
+
+  <div class="display-card" id="displayCard">
+    <p class="speaker-name idle" id="speakerName">—</p>
+    <p class="score-line" id="scoreLine">en attente</p>
+  </div>
+
+  <div class="controls">
+    <button class="primary" id="startBtn">Démarrer l'écoute</button>
+    <button class="danger" id="stopBtn" disabled>Arrêter</button>
+  </div>
+
+  <p class="status-line" id="statusLine">Non connecté</p>
+
+  <section>
+    <h2>Enrôler une personne</h2>
+    <div class="enroll-row">
+      <input type="text" id="enrollName" placeholder="Nom (ex: Claude)">
+    </div>
+    <div class="controls">
+      <button class="primary" id="recordEnrollBtn">Enregistrer 10s</button>
+    </div>
+    <p class="enroll-status" id="enrollStatus"></p>
+  </section>
+
+  <section>
+    <h2>Personnes enrôlées</h2>
+    <div class="speaker-list" id="speakerList"><p class="enroll-status">Chargement...</p></div>
+  </section>
+</div>
+
+<script>
+// URL de ton service Railway en production.
+const SERVER_HTTP = "https://voiceprint-production.up.railway.app";
+const SERVER_WS = "wss://voiceprint-production.up.railway.app";
+
+const TARGET_SAMPLE_RATE = 16000;
+
+let audioContext, mediaStream, workletNode, ws;
+let isListening = false;
+
+const els = {
+  startBtn: document.getElementById("startBtn"),
+  stopBtn: document.getElementById("stopBtn"),
+  statusLine: document.getElementById("statusLine"),
+  speakerName: document.getElementById("speakerName"),
+  scoreLine: document.getElementById("scoreLine"),
+  displayCard: document.getElementById("displayCard"),
+  enrollName: document.getElementById("enrollName"),
+  recordEnrollBtn: document.getElementById("recordEnrollBtn"),
+  enrollStatus: document.getElementById("enrollStatus"),
+  speakerList: document.getElementById("speakerList"),
+};
+
+function setStatus(text) { els.statusLine.textContent = text; }
+
+function setDisplay(state, name, score) {
+  els.displayCard.classList.toggle("active", state === "known");
+  els.speakerName.className = "speaker-name " + state;
+  if (state === "idle") {
+    els.speakerName.textContent = "—";
+    els.scoreLine.textContent = "en attente";
+  } else if (state === "unknown") {
+    els.speakerName.textContent = "Inconnu";
+    els.scoreLine.textContent = `score: ${score.toFixed(3)}`;
+  } else {
+    els.speakerName.textContent = name;
+    els.scoreLine.textContent = `score: ${score.toFixed(3)}`;
+  }
+}
+
+// --- Resampling : le micro fournit souvent 44.1/48kHz, ECAPA veut 16kHz ---
+// On laisse AudioContext capturer au sample rate natif du device, puis on
+// resample nous-mêmes en JS avant l'envoi (simple décimation linéaire,
+// suffisant pour de la parole : pas besoin d'un filtre anti-aliasing
+// sophistiqué à ce ratio).
+function resampleTo16k(float32Array, originalSampleRate) {
+  if (originalSampleRate === TARGET_SAMPLE_RATE) return float32Array;
+  const ratio = originalSampleRate / TARGET_SAMPLE_RATE;
+  const newLength = Math.round(float32Array.length / ratio);
+  const result = new Float32Array(newLength);
+  for (let i = 0; i < newLength; i++) {
+    const srcIndex = i * ratio;
+    const srcIndexFloor = Math.floor(srcIndex);
+    const frac = srcIndex - srcIndexFloor;
+    const a = float32Array[srcIndexFloor] || 0;
+    const b = float32Array[srcIndexFloor + 1] || a;
+    result[i] = a + (b - a) * frac;
+  }
+  return result;
+}
+
+async function startListening() {
+  try {
+    mediaStream = await navigator.mediaDevices.getUserMedia({
+      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+    });
+  } catch (err) {
+    setStatus("Micro refusé : " + err.message);
+    return;
+  }
+
+  audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  const nativeSampleRate = audioContext.sampleRate; // souvent 44100 ou 48000 sur iPhone
+
+  await audioContext.audioWorklet.addModule("mic-worklet.js");
+  const source = audioContext.createMediaStreamSource(mediaStream);
+  workletNode = new AudioWorkletNode(audioContext, "mic-capture-processor");
+
+  ws = new WebSocket(`${SERVER_WS}/ws/identify`);
+  ws.binaryType = "arraybuffer";
+
+  ws.onopen = () => setStatus("Connecté — écoute en cours");
+  ws.onclose = () => setStatus("Déconnecté");
+  ws.onerror = () => setStatus("Erreur WebSocket");
+
+  ws.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    if (data.status === "silence") {
+      setDisplay("idle", null, 0);
+    } else if (data.name) {
+      setDisplay("known", data.name, data.score);
+    } else {
+      setDisplay("unknown", null, data.score);
+    }
+  };
+
+  workletNode.port.onmessage = (event) => {
+    if (ws.readyState !== WebSocket.OPEN) return;
+    const resampled = resampleTo16k(event.data, nativeSampleRate);
+    ws.send(resampled.buffer);
+  };
+
+  source.connect(workletNode);
+  // On ne connecte PAS workletNode à audioContext.destination :
+  // on ne veut pas faire jouer le micro dans les haut-parleurs (feedback).
+
+  isListening = true;
+  els.startBtn.disabled = true;
+  els.stopBtn.disabled = false;
+}
+
+function stopListening() {
+  if (ws) ws.close();
+  if (workletNode) workletNode.disconnect();
+  if (mediaStream) mediaStream.getTracks().forEach((t) => t.stop());
+  if (audioContext) audioContext.close();
+  isListening = false;
+  els.startBtn.disabled = false;
+  els.stopBtn.disabled = true;
+  setStatus("Arrêté");
+  setDisplay("idle", null, 0);
+}
+
+els.startBtn.addEventListener("click", startListening);
+els.stopBtn.addEventListener("click", stopListening);
+
+// --- Enrôlement : enregistre 10s via MediaRecorder et envoie au serveur ---
+els.recordEnrollBtn.addEventListener("click", async () => {
+  const name = els.enrollName.value.trim();
+  if (!name) {
+    els.enrollStatus.textContent = "Entre un nom d'abord.";
+    return;
+  }
+
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (err) {
+    els.enrollStatus.textContent = "Micro refusé : " + err.message;
+    return;
+  }
+
+  const recorder = new MediaRecorder(stream);
+  const chunks = [];
+  recorder.ondataavailable = (e) => chunks.push(e.data);
+
+  let secondsLeft = 10;
+  els.recordEnrollBtn.disabled = true;
+  els.enrollStatus.textContent = `Enregistrement... ${secondsLeft}s — parle normalement`;
+  const countdown = setInterval(() => {
+    secondsLeft -= 1;
+    els.enrollStatus.textContent = secondsLeft > 0
+      ? `Enregistrement... ${secondsLeft}s — parle normalement`
+      : "Envoi au serveur...";
+  }, 1000);
+
+  recorder.onstop = async () => {
+    clearInterval(countdown);
+    stream.getTracks().forEach((t) => t.stop());
+    const blob = new Blob(chunks, { type: "audio/webm" });
+
+    const formData = new FormData();
+    formData.append("file", blob, "enroll.webm");
+
+    try {
+      const res = await fetch(`${SERVER_HTTP}/enroll?name=${encodeURIComponent(name)}`, {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+      if (res.ok) {
+        els.enrollStatus.textContent = `${name} enrôlé (${data.duration_s}s d'audio analysées).`;
+        els.enrollName.value = "";
+        loadSpeakers();
+      } else {
+        els.enrollStatus.textContent = "Erreur : " + (data.detail || "inconnue");
+      }
+    } catch (err) {
+      els.enrollStatus.textContent = "Erreur réseau : " + err.message;
+    } finally {
+      els.recordEnrollBtn.disabled = false;
+    }
+  };
+
+  recorder.start();
+  setTimeout(() => recorder.stop(), 10000);
+});
+
+// --- Liste des locuteurs enrôlés ---
+async function loadSpeakers() {
+  try {
+    const res = await fetch(`${SERVER_HTTP}/speakers`);
+    const data = await res.json();
+    if (data.speakers.length === 0) {
+      els.speakerList.innerHTML = '<p class="enroll-status">Aucune personne enrôlée.</p>';
+      return;
+    }
+    els.speakerList.innerHTML = data.speakers
+      .map(
+        (name) => `
+        <div class="speaker-item">
+          <span>${name}</span>
+          <button data-name="${name}" class="remove-btn">Supprimer</button>
+        </div>`
+      )
+      .join("");
+    document.querySelectorAll(".remove-btn").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        await fetch(`${SERVER_HTTP}/speakers/${encodeURIComponent(btn.dataset.name)}`, { method: "DELETE" });
+        loadSpeakers();
+      });
+    });
+  } catch (err) {
+    els.speakerList.innerHTML = `<p class="enroll-status">Erreur de chargement : ${err.message}</p>`;
+  }
+}
+
+loadSpeakers();
+</script>
+</body>
+</html>
