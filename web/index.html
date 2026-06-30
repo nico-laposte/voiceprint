@@ -217,7 +217,13 @@ async function startListening() {
   }
 
   audioContext = new (window.AudioContext || window.webkitAudioContext)();
-  const nativeSampleRate = audioContext.sampleRate; // souvent 44100 ou 48000 sur iPhone
+  const nativeSampleRate = audioContext.sampleRate;
+
+  // Safari iOS suspend souvent l'AudioContext automatiquement — le resume()
+  // explicite ici est obligatoire pour garantir la capture continue.
+  if (audioContext.state === "suspended") {
+    await audioContext.resume();
+  }
 
   await audioContext.audioWorklet.addModule("mic-worklet.js");
   const source = audioContext.createMediaStreamSource(mediaStream);
@@ -226,6 +232,7 @@ async function startListening() {
   ws = new WebSocket(`${SERVER_WS}/ws/identify`);
   ws.binaryType = "arraybuffer";
 
+  let chunkCount = 0;
   ws.onopen = () => setStatus("Connecté — écoute en cours");
   ws.onclose = () => setStatus("Déconnecté");
   ws.onerror = () => setStatus("Erreur WebSocket");
@@ -245,6 +252,12 @@ async function startListening() {
     if (ws.readyState !== WebSocket.OPEN) return;
     const resampled = resampleTo16k(event.data, nativeSampleRate);
     ws.send(resampled.buffer);
+    chunkCount++;
+    // Affiche le nombre de chunks envoyés toutes les 10 trames pour confirmer
+    // que l'AudioWorklet capture bien (disparaît dès qu'un résultat arrive)
+    if (chunkCount % 10 === 0) {
+      setStatus(`Connecté — ${chunkCount} trames envoyées (AudioContext: ${audioContext.state})`);
+    }
   };
 
   source.connect(workletNode);
