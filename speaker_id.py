@@ -39,6 +39,13 @@ class SpeakerIdentifier:
         )
         self.enrolled: dict[str, list[float]] = self._load_enrolled()
         print(f"[SpeakerIdentifier] {len(self.enrolled)} locuteur(s) enrôlé(s): {list(self.enrolled.keys())}")
+        # Préchauffage : un premier appel factice pour que PyTorch compile
+        # les kernels JIT — sans ça, la première vraie inférence peut prendre
+        # 30-60s, ce qui dépasse le timeout de Safari et cause "Load failed".
+        print("[SpeakerIdentifier] préchauffage du modèle...")
+        dummy = np.zeros(SAMPLE_RATE * 3, dtype=np.float32)  # 3s de silence
+        self.extract_embedding(dummy)
+        print("[SpeakerIdentifier] préchauffage terminé, serveur prêt.")
 
     def _load_enrolled(self) -> dict[str, list[float]]:
         if EMBEDDINGS_PATH.exists():
