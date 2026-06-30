@@ -73,7 +73,16 @@ def decode_audio_bytes(raw: bytes, filename_hint: str = "audio.webm") -> np.ndar
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=True) as tmp:
         tmp.write(raw)
         tmp.flush()
-        waveform, sr = torchaudio.load(tmp.name)  # (channels, samples)
+        # backend="ffmpeg" est obligatoire ici : le backend "soundfile" (souvent
+        # choisi par défaut par torchaudio) ne sait PAS décoder l'AAC/MP4 envoyé
+        # par Safari iOS ("Format not recognised" sinon), seul ffmpeg le sait.
+        available = torchaudio.list_audio_backends()
+        if "ffmpeg" not in available:
+            raise RuntimeError(
+                f"Backend ffmpeg indisponible dans torchaudio (backends trouvés: {available}). "
+                "Vérifie que ffmpeg est bien installé dans l'image Docker."
+            )
+        waveform, sr = torchaudio.load(tmp.name, backend="ffmpeg")  # (channels, samples)
 
     if waveform.shape[0] > 1:
         waveform = waveform.mean(dim=0, keepdim=True)
