@@ -239,7 +239,11 @@ async function startListening() {
 
   ws.onmessage = (event) => {
     const data = JSON.parse(event.data);
-    if (data.status === "silence") {
+    // Diagnostic : affiche le dernier message brut reçu dans le statut
+    setStatus(`msg reçu: ${data.status} / ${data.name || "-"} / ${data.score || data.detail || ""}`);
+    if (data.status === "processing") {
+      setStatus(`Fenêtre reçue par le serveur (${data.buffer_size} samples) — inférence en cours...`);
+    } else if (data.status === "silence") {
       setDisplay("idle", null, 0);
     } else if (data.status === "error") {
       setStatus("Erreur serveur : " + (data.detail || "inconnue"));
