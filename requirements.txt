@@ -1,6 +1,7 @@
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
 speechbrain==1.0.2
+huggingface_hub==0.25.2
 numpy==1.26.4
 webrtcvad==2.0.10
 python-multipart==0.0.9
