@@ -49,7 +49,8 @@ WINDOW_SECONDS = 2.5
 HOP_SECONDS = 1.0
 WINDOW_SAMPLES = int(WINDOW_SECONDS * SAMPLE_RATE)
 HOP_SAMPLES = int(HOP_SECONDS * SAMPLE_RATE)
-SIMILARITY_THRESHOLD = 0.45
+SIMILARITY_THRESHOLD = 0.35  # Baissé de 0.45 : l'audio micro iPhone en conditions
+                              # réelles produit des scores plus bas qu'en test propre
 
 # Lissage temporel : on garde les N derniers résultats et on vote,
 # pour éviter que le nom affiché change à chaque fenêtre sur du bruit limite.
@@ -148,30 +149,34 @@ async def ws_identify(websocket: WebSocket):
     try:
         while True:
             message = await websocket.receive_bytes()
-            # Le client envoie du PCM float32 brut, little-endian
             chunk = np.frombuffer(message, dtype=np.float32)
             buffer = np.concatenate([buffer, chunk])
 
-            # Tant qu'on a assez de samples pour une fenêtre complète,
-            # on traite et on avance de HOP_SAMPLES (chevauchement géré ici)
             while len(buffer) >= WINDOW_SAMPLES:
                 window = buffer[:WINDOW_SAMPLES]
-                buffer = buffer[HOP_SAMPLES:]  # avance du hop, garde le reste pour chevauchement
+                buffer = buffer[HOP_SAMPLES:]
 
-                if not vad.has_speech(window):
+                try:
+                    has_voice = vad.has_speech(window)
+                except Exception as e:
+                    print(f"[ws_identify] erreur VAD: {e}")
+                    has_voice = True  # en cas d'erreur VAD, on tente quand même l'inférence
+
+                if not has_voice:
                     recent_results.append(None)
                     await websocket.send_json({"status": "silence"})
                     continue
 
-                result = identifier.identify(window, threshold=SIMILARITY_THRESHOLD)
-                recent_results.append(result["name"])
+                try:
+                    result = identifier.identify(window, threshold=SIMILARITY_THRESHOLD)
+                except Exception as e:
+                    print(f"[ws_identify] erreur ECAPA: {e}")
+                    await websocket.send_json({"status": "error", "detail": str(e)})
+                    continue
 
-                # Vote de lissage sur les dernières fenêtres avec voix détectée
+                recent_results.append(result["name"])
                 votes = [r for r in recent_results if r is not None]
-                if votes:
-                    smoothed_name = max(set(votes), key=votes.count)
-                else:
-                    smoothed_name = None
+                smoothed_name = max(set(votes), key=votes.count) if votes else None
 
                 await websocket.send_json({
                     "status": "speech",
@@ -183,3 +188,9 @@ async def ws_identify(websocket: WebSocket):
 
     except WebSocketDisconnect:
         print("[ws_identify] client déconnecté")
+    except Exception as e:
+        print(f"[ws_identify] erreur inattendue: {e}")
+        try:
+            await websocket.send_json({"status": "error", "detail": str(e)})
+        except Exception:
+            pass
