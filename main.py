@@ -12,12 +12,11 @@ Lancer avec : uvicorn main:app --host 0.0.0.0 --port 8000
 import io
 import collections
 import tempfile
+import subprocess
 from pathlib import Path
 
 import numpy as np
 import soundfile as sf
-import torchaudio
-import torch
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -62,33 +61,43 @@ def decode_audio_bytes(raw: bytes, filename_hint: str = "audio.webm") -> np.ndar
     Décode un blob audio (webm/opus depuis Chrome, ou mp4/AAC depuis Safari)
     en numpy float32 mono 16kHz.
 
-    On passe par un vrai fichier temporaire (plutôt qu'un BytesIO en mémoire)
-    car torchaudio/ffmpeg a besoin de l'extension du fichier pour deviner
-    fiablement le conteneur — la détection automatique depuis un flux en
-    mémoire sans extension échoue souvent sur MP4 ("Format not recognised"),
-    notamment pour l'audio envoyé par Safari (qui encode en audio/mp4, pas
-    en webm comme Chrome/Firefox).
+    On appelle ffmpeg directement en sous-processus pour convertir le blob
+    en WAV PCM, puis on lit ce WAV avec soundfile. C'est plus robuste que de
+    laisser torchaudio détecter et charger dynamiquement ses propres
+    bindings ffmpeg : sur certaines images Docker, torchaudio.load(...,
+    backend="ffmpeg") échoue silencieusement à charger les bibliothèques
+    ffmpeg même quand le binaire ffmpeg est bien installé et fonctionnel
+    en ligne de commande (cf. torchaudio.list_audio_backends() qui ne
+    retourne alors que ['soundfile']). En passant par le binaire ffmpeg
+    système via subprocess, on évite complètement ce problème de binding.
     """
     suffix = Path(filename_hint).suffix or ".webm"
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=True) as tmp:
-        tmp.write(raw)
-        tmp.flush()
-        # backend="ffmpeg" est obligatoire ici : le backend "soundfile" (souvent
-        # choisi par défaut par torchaudio) ne sait PAS décoder l'AAC/MP4 envoyé
-        # par Safari iOS ("Format not recognised" sinon), seul ffmpeg le sait.
-        available = torchaudio.list_audio_backends()
-        if "ffmpeg" not in available:
-            raise RuntimeError(
-                f"Backend ffmpeg indisponible dans torchaudio (backends trouvés: {available}). "
-                "Vérifie que ffmpeg est bien installé dans l'image Docker."
-            )
-        waveform, sr = torchaudio.load(tmp.name, backend="ffmpeg")  # (channels, samples)
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=True) as src_tmp:
+        src_tmp.write(raw)
+        src_tmp.flush()
 
-    if waveform.shape[0] > 1:
-        waveform = waveform.mean(dim=0, keepdim=True)
-    if sr != SAMPLE_RATE:
-        waveform = torchaudio.functional.resample(waveform, sr, SAMPLE_RATE)
-    return waveform.squeeze(0).numpy().astype(np.float32)
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as wav_tmp:
+            result = subprocess.run(
+                [
+                    "ffmpeg", "-y",
+                    "-i", src_tmp.name,
+                    "-ar", str(SAMPLE_RATE),
+                    "-ac", "1",
+                    "-f", "wav",
+                    wav_tmp.name,
+                ],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(f"ffmpeg a échoué à convertir l'audio : {result.stderr[-500:]}")
+
+            audio, sr = sf.read(wav_tmp.name, dtype="float32")
+
+    if audio.ndim > 1:
+        audio = audio.mean(axis=1)
+    # ffmpeg a déjà resamplé à SAMPLE_RATE via -ar, donc sr == SAMPLE_RATE ici
+    return audio.astype(np.float32)
 
 
 @app.post("/enroll")
