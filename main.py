@@ -169,6 +169,9 @@ async def ws_identify(websocket: WebSocket):
                 window = buffer[:WINDOW_SAMPLES]
                 buffer = buffer[HOP_SAMPLES:]
 
+                # Accusé de réception immédiat pour confirmer que la boucle tourne
+                await websocket.send_json({"status": "processing", "buffer_size": len(window)})
+
                 try:
                     has_voice = True  # VAD désactivée temporairement pour diagnostic
                     # has_voice = vad.has_speech(window)
