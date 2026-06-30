@@ -287,7 +287,20 @@ els.recordEnrollBtn.addEventListener("click", async () => {
     return;
   }
 
-  const recorder = new MediaRecorder(stream);
+  // Détection du format supporté : Safari (iOS/macOS) n'écrit que de
+  // l'audio/mp4 (AAC), alors que Chrome/Firefox écrivent du audio/webm
+  // (Opus) par défaut. Forcer "webm" en dur cassait l'enrôlement sur
+  // iPhone (le blob réel était en mp4, le serveur tentait de le décoder
+  // comme du webm -> "Format not recognised").
+  const mimeCandidates = [
+    "audio/mp4",
+    "audio/webm;codecs=opus",
+    "audio/webm",
+  ];
+  const selectedMimeType = mimeCandidates.find((t) => MediaRecorder.isTypeSupported(t)) || "";
+  const recorder = selectedMimeType
+    ? new MediaRecorder(stream, { mimeType: selectedMimeType })
+    : new MediaRecorder(stream); // fallback : laisse le navigateur choisir
   const chunks = [];
   recorder.ondataavailable = (e) => chunks.push(e.data);
 
@@ -304,10 +317,14 @@ els.recordEnrollBtn.addEventListener("click", async () => {
   recorder.onstop = async () => {
     clearInterval(countdown);
     stream.getTracks().forEach((t) => t.stop());
-    const blob = new Blob(chunks, { type: "audio/webm" });
+    const actualMimeType = recorder.mimeType || selectedMimeType || "audio/webm";
+    const blob = new Blob(chunks, { type: actualMimeType });
 
+    // L'extension doit correspondre au conteneur réel pour que torchaudio/ffmpeg
+    // côté serveur le décode correctement (mp4 pour Safari, webm sinon).
+    const extension = actualMimeType.includes("mp4") ? "m4a" : "webm";
     const formData = new FormData();
-    formData.append("file", blob, "enroll.webm");
+    formData.append("file", blob, `enroll.${extension}`);
 
     try {
       const res = await fetch(`${SERVER_HTTP}/enroll?name=${encodeURIComponent(name)}`, {
