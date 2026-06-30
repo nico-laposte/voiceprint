@@ -238,10 +238,28 @@ async function startListening() {
   ws.onerror = () => setStatus("Erreur WebSocket");
 
   ws.onmessage = (event) => {
-    const data = JSON.parse(event.data);
+    let data;
+    try {
+      // Quand binaryType="arraybuffer", Safari peut traiter les messages
+      // texte JSON comme des ArrayBuffer — on gère les deux cas.
+      if (typeof event.data === "string") {
+        data = JSON.parse(event.data);
+      } else if (event.data instanceof ArrayBuffer) {
+        const text = new TextDecoder().decode(event.data);
+        data = JSON.parse(text);
+      } else {
+        setStatus("Type de message inattendu : " + typeof event.data);
+        return;
+      }
+    } catch (e) {
+      setStatus("Erreur parsing message : " + e.message);
+      return;
+    }
     // Diagnostic : affiche le dernier message brut reçu dans le statut
     setStatus(`msg reçu: ${data.status} / ${data.name || "-"} / ${data.score || data.detail || ""}`);
-    if (data.status === "processing") {
+    if (data.status === "chunk_received") {
+      setStatus(`chunk: ${data.chunk_samples} samples | buffer: ${data.buffer_samples}/${data.window_needed}`);
+    } else if (data.status === "processing") {
       setStatus(`Fenêtre reçue par le serveur (${data.buffer_size} samples) — inférence en cours...`);
     } else if (data.status === "silence") {
       setDisplay("idle", null, 0);
