@@ -298,35 +298,57 @@ els.recordEnrollBtn.addEventListener("click", async () => {
     "audio/webm",
   ];
   const selectedMimeType = mimeCandidates.find((t) => MediaRecorder.isTypeSupported(t)) || "";
-  const recorder = selectedMimeType
-    ? new MediaRecorder(stream, { mimeType: selectedMimeType })
-    : new MediaRecorder(stream); // fallback : laisse le navigateur choisir
+
+  let recorder;
+  try {
+    recorder = selectedMimeType
+      ? new MediaRecorder(stream, { mimeType: selectedMimeType })
+      : new MediaRecorder(stream); // fallback : laisse le navigateur choisir
+  } catch (err) {
+    els.enrollStatus.textContent = "Erreur création MediaRecorder : " + err.message;
+    stream.getTracks().forEach((t) => t.stop());
+    return;
+  }
+
   const chunks = [];
   recorder.ondataavailable = (e) => chunks.push(e.data);
+  recorder.onerror = (event) => {
+    els.enrollStatus.textContent = "Erreur d'enregistrement : " + (event.error?.message || "inconnue");
+    els.recordEnrollBtn.disabled = false;
+  };
 
   let secondsLeft = 10;
   els.recordEnrollBtn.disabled = true;
-  els.enrollStatus.textContent = `Enregistrement... ${secondsLeft}s — parle normalement`;
+  els.enrollStatus.textContent = `Enregistrement... ${secondsLeft}s — parle normalement (format: ${selectedMimeType || "défaut"})`;
   const countdown = setInterval(() => {
     secondsLeft -= 1;
     els.enrollStatus.textContent = secondsLeft > 0
       ? `Enregistrement... ${secondsLeft}s — parle normalement`
-      : "Envoi au serveur...";
+      : "Arrêt en cours...";
   }, 1000);
 
   recorder.onstop = async () => {
     clearInterval(countdown);
+    els.enrollStatus.textContent = "Traitement de l'enregistrement...";
     stream.getTracks().forEach((t) => t.stop());
-    const actualMimeType = recorder.mimeType || selectedMimeType || "audio/webm";
-    const blob = new Blob(chunks, { type: actualMimeType });
-
-    // L'extension doit correspondre au conteneur réel pour que torchaudio/ffmpeg
-    // côté serveur le décode correctement (mp4 pour Safari, webm sinon).
-    const extension = actualMimeType.includes("mp4") ? "m4a" : "webm";
-    const formData = new FormData();
-    formData.append("file", blob, `enroll.${extension}`);
 
     try {
+      const actualMimeType = recorder.mimeType || selectedMimeType || "audio/webm";
+      const blob = new Blob(chunks, { type: actualMimeType });
+
+      if (blob.size === 0) {
+        els.enrollStatus.textContent = "Erreur : aucun audio capturé (blob vide).";
+        els.recordEnrollBtn.disabled = false;
+        return;
+      }
+
+      // L'extension doit correspondre au conteneur réel pour que le serveur
+      // (ffmpeg) le décode correctement (m4a pour Safari, webm sinon).
+      const extension = actualMimeType.includes("mp4") ? "m4a" : "webm";
+      const formData = new FormData();
+      formData.append("file", blob, `enroll.${extension}`);
+
+      els.enrollStatus.textContent = "Envoi au serveur...";
       const res = await fetch(`${SERVER_HTTP}/enroll?name=${encodeURIComponent(name)}`, {
         method: "POST",
         body: formData,
@@ -346,8 +368,18 @@ els.recordEnrollBtn.addEventListener("click", async () => {
     }
   };
 
-  recorder.start();
-  setTimeout(() => recorder.stop(), 10000);
+  try {
+    recorder.start();
+  } catch (err) {
+    els.enrollStatus.textContent = "Erreur démarrage enregistrement : " + err.message;
+    els.recordEnrollBtn.disabled = false;
+    clearInterval(countdown);
+    stream.getTracks().forEach((t) => t.stop());
+    return;
+  }
+  setTimeout(() => {
+    if (recorder.state === "recording") recorder.stop();
+  }, 10000);
 });
 
 // --- Liste des locuteurs enrôlés ---
