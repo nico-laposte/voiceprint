@@ -11,6 +11,8 @@ Lancer avec : uvicorn main:app --host 0.0.0.0 --port 8000
 
 import io
 import collections
+import tempfile
+from pathlib import Path
 
 import numpy as np
 import soundfile as sf
@@ -55,14 +57,24 @@ SIMILARITY_THRESHOLD = 0.45
 SMOOTHING_WINDOW = 3
 
 
-def decode_audio_bytes(raw: bytes) -> np.ndarray:
+def decode_audio_bytes(raw: bytes, filename_hint: str = "audio.webm") -> np.ndarray:
     """
-    Décode un blob audio (webm/opus envoyé par le navigateur) en numpy
-    float32 mono 16kHz. Le client envoie des chunks encodés par
-    MediaRecorder ; on les décode ici avec torchaudio (ffmpeg backend).
+    Décode un blob audio (webm/opus depuis Chrome, ou mp4/AAC depuis Safari)
+    en numpy float32 mono 16kHz.
+
+    On passe par un vrai fichier temporaire (plutôt qu'un BytesIO en mémoire)
+    car torchaudio/ffmpeg a besoin de l'extension du fichier pour deviner
+    fiablement le conteneur — la détection automatique depuis un flux en
+    mémoire sans extension échoue souvent sur MP4 ("Format not recognised"),
+    notamment pour l'audio envoyé par Safari (qui encode en audio/mp4, pas
+    en webm comme Chrome/Firefox).
     """
-    buf = io.BytesIO(raw)
-    waveform, sr = torchaudio.load(buf)  # (channels, samples)
+    suffix = Path(filename_hint).suffix or ".webm"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=True) as tmp:
+        tmp.write(raw)
+        tmp.flush()
+        waveform, sr = torchaudio.load(tmp.name)  # (channels, samples)
+
     if waveform.shape[0] > 1:
         waveform = waveform.mean(dim=0, keepdim=True)
     if sr != SAMPLE_RATE:
@@ -74,7 +86,7 @@ def decode_audio_bytes(raw: bytes) -> np.ndarray:
 async def enroll(name: str, file: UploadFile = File(...)):
     raw = await file.read()
     try:
-        audio = decode_audio_bytes(raw)
+        audio = decode_audio_bytes(raw, filename_hint=file.filename or "audio.webm")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Audio illisible: {e}")
 
