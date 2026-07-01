@@ -94,6 +94,8 @@ async def ws_identify(websocket: WebSocket):
             buffer = np.concatenate([buffer, chunk])
             chunk_count += 1
             print(f"[WS] chunk #{chunk_count}: {len(chunk)} samples, buffer total: {len(buffer)}/{WINDOW_SAMPLES}")
+            # Accusé immédiat pour maintenir la connexion Railway active
+            await websocket.send_json({"status": "ok", "buffer": len(buffer), "needed": WINDOW_SAMPLES})
 
             while len(buffer) >= WINDOW_SAMPLES:
                 window = buffer[:WINDOW_SAMPLES]
