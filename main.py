@@ -98,9 +98,10 @@ async def ws_identify(websocket: WebSocket):
 
     try:
         while True:
-            message = await websocket.receive_bytes()
-            print(f"[ws_identify] reçu {len(message)} bytes")
-            chunk = np.frombuffer(message, dtype=np.float32)
+            message = await websocket.receive()
+            print(f"[ws_identify] reçu type={message.get('type')} bytes={len(message.get('bytes') or message.get('text',''))} ")
+            raw = message.get("bytes") or (message.get("text", "").encode())
+            chunk = np.frombuffer(raw, dtype=np.float32)
             buffer = np.concatenate([buffer, chunk])
 
             while len(buffer) >= WINDOW_SAMPLES:
