@@ -11,7 +11,9 @@ autour change. C'est là tout l'intérêt du découpage.
 
 from __future__ import annotations
 
+import os
 import subprocess
+import tempfile
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -101,20 +103,29 @@ class AudioProcessor:
                 "ouvre-le d'abord dans l'app Fichiers pour le télécharger localement."
             )
 
-        proc = subprocess.run(
-            [
-                "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
-                "-i", "pipe:0",
-                "-vn",                       # ignore toute piste vidéo
-                "-map", "0:a:0?",            # première piste audio si elle existe
-                "-f", "f32le", "-acodec", "pcm_f32le",
-                "-ac", "1", "-ar", str(SAMPLE_RATE),
-                "pipe:1",
-            ],
-            input=raw,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
+        # MP4/M4A rangent souvent leur index (atome 'moov') en fin de fichier :
+        # ffmpeg doit pouvoir SE DÉPLACER dedans, ce qu'un pipe (pipe:0) interdit.
+        # On écrit donc l'entrée dans un fichier temporaire seekable.
+        with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as tf:
+            tf.write(raw)
+            tmp_path = tf.name
+
+        try:
+            proc = subprocess.run(
+                [
+                    "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
+                    "-i", tmp_path,
+                    "-vn",                       # ignore toute piste vidéo
+                    "-map", "0:a:0?",            # première piste audio si elle existe
+                    "-f", "f32le", "-acodec", "pcm_f32le",
+                    "-ac", "1", "-ar", str(SAMPLE_RATE),
+                    "pipe:1",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+        finally:
+            os.unlink(tmp_path)
         err = proc.stderr.decode("utf-8", "ignore").strip()
         tail = err.splitlines()[-1] if err else ""
 
