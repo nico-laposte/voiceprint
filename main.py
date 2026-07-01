@@ -93,16 +93,51 @@ async def delete_speaker(name: str):
 @app.websocket("/ws/identify")
 async def ws_identify(websocket: WebSocket):
     await websocket.accept()
-    print("[echo] connexion acceptée")
+    buffer = np.zeros(0, dtype=np.float32)
+    recent_results = collections.deque(maxlen=SMOOTHING_WINDOW)
+
     try:
         while True:
             message = await websocket.receive()
-            msg_type = message.get("type")
-            msg_bytes = message.get("bytes") or b""
-            msg_text = message.get("text") or ""
-            print(f"[echo] type={msg_type} bytes={len(msg_bytes)} text={len(msg_text)}")
-            await websocket.send_json({"status": "echo", "received": True})
+            raw = message.get("bytes") or b""
+            if not raw:
+                continue
+            chunk = np.frombuffer(raw, dtype=np.float32)
+            buffer = np.concatenate([buffer, chunk])
+
+            while len(buffer) >= WINDOW_SAMPLES:
+                window = buffer[:WINDOW_SAMPLES]
+                buffer = buffer[HOP_SAMPLES:]
+
+                try:
+                    has_voice = vad.has_speech(window)
+                except Exception:
+                    has_voice = True
+
+                if not has_voice:
+                    recent_results.append(None)
+                    await websocket.send_json({"status": "silence"})
+                    continue
+
+                try:
+                    result = identifier.identify(window, threshold=SIMILARITY_THRESHOLD)
+                except Exception as e:
+                    await websocket.send_json({"status": "error", "detail": str(e)})
+                    continue
+
+                recent_results.append(result["name"])
+                votes = [r for r in recent_results if r is not None]
+                smoothed_name = max(set(votes), key=votes.count) if votes else None
+
+                await websocket.send_json({
+                    "status": "speech",
+                    "name": smoothed_name,
+                    "raw_name": result["name"],
+                    "score": round(result["score"], 3),
+                    "all_scores": {k: round(v, 3) for k, v in result["all_scores"].items()},
+                })
+
     except WebSocketDisconnect:
-        print("[echo] déconnecté")
+        print("[ws_identify] client déconnecté")
     except Exception as e:
-        print(f"[echo] erreur: {e}")
+        print(f"[ws_identify] erreur: {e}")
