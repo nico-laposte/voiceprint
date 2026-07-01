@@ -99,6 +99,7 @@ async def ws_identify(websocket: WebSocket):
     try:
         while True:
             message = await websocket.receive_bytes()
+            print(f"[ws_identify] reçu {len(message)} bytes")
             chunk = np.frombuffer(message, dtype=np.float32)
             buffer = np.concatenate([buffer, chunk])
 
@@ -135,6 +136,8 @@ async def ws_identify(websocket: WebSocket):
                 })
 
     except WebSocketDisconnect:
-        print("[ws_identify] client déconnecté")
+        print("[ws_identify] client déconnecté normalement")
     except Exception as e:
-        print(f"[ws_identify] erreur: {e}")
+        import traceback
+        print(f"[ws_identify] ERREUR FATALE: {e}")
+        print(traceback.format_exc())
