@@ -1,1 +1,363 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>VoiceID</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#16181D; --paper:#EEF0F3; --card:#FFFFFF; --line:#E2E5EA;
+    --muted:#6B7280; --text:#1F2430;
+    --known:#2FA36B; --unknown:#E08A2B; --live:#4C7DF0;
+    --radius:14px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    background:var(--paper); color:var(--text);
+    font-family:"Inter",system-ui,sans-serif; line-height:1.5;
+    padding:max(16px,env(safe-area-inset-top)) 16px 40px;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:520px;margin:0 auto}
+  header{display:flex;align-items:baseline;gap:10px;margin:8px 2px 20px}
+  header h1{
+    font-family:"Space Grotesk",sans-serif;font-weight:700;font-size:26px;
+    letter-spacing:-.02em;margin:0;color:var(--ink)
+  }
+  header .sub{color:var(--muted);font-size:13px}
 
+  /* --- Stage : le lieu de l'écoute, seul bloc sombre --- */
+  .stage{
+    background:var(--ink);border-radius:20px;padding:26px 22px 22px;
+    color:#fff;text-align:center;position:relative;overflow:hidden
+  }
+  .stage .label{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#8A90A0}
+  .verdict{
+    font-family:"Space Grotesk",sans-serif;font-weight:700;
+    font-size:34px;letter-spacing:-.02em;margin:10px 0 2px;min-height:42px;
+    transition:color .2s
+  }
+  .verdict.known{color:#63E3A6}
+  .verdict.unknown{color:#F2B25A}
+  .verdict.live{color:#8FB0FF}
+  .score{font-family:"IBM Plex Mono",monospace;font-size:13px;color:#9AA0B0;min-height:18px}
+
+  /* vumètre : élément signature, réagit au micro */
+  .meter{display:flex;gap:3px;align-items:flex-end;justify-content:center;height:46px;margin:18px 0 20px}
+  .meter i{width:5px;height:6px;background:#333846;border-radius:3px;transition:height .06s linear,background .2s}
+  .meter.active i{background:var(--live)}
+
+  .mic{
+    appearance:none;border:none;cursor:pointer;
+    width:100%;padding:15px;border-radius:var(--radius);
+    background:#fff;color:var(--ink);font-weight:600;font-size:16px;
+    font-family:inherit;transition:transform .08s,background .2s
+  }
+  .mic:active{transform:scale(.99)}
+  .mic.recording{background:var(--live);color:#fff}
+  .mic:disabled{opacity:.5;cursor:default}
+  .timer{font-family:"IBM Plex Mono",monospace;font-size:12px;color:#8A90A0;margin-top:10px;min-height:16px}
+
+  /* --- Cartes --- */
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:18px;margin-top:16px}
+  .card h2{font-family:"Space Grotesk",sans-serif;font-size:15px;font-weight:600;margin:0 0 4px;color:var(--ink)}
+  .card p.hint{margin:0 0 14px;font-size:13px;color:var(--muted)}
+  label.fld{display:block;font-size:12px;font-weight:600;color:var(--muted);margin:0 0 6px}
+  input[type=text]{
+    width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;
+    font:inherit;font-size:15px;margin-bottom:12px;background:#fff
+  }
+  input[type=text]:focus{outline:2px solid var(--live);outline-offset:1px;border-color:transparent}
+  .row{display:flex;gap:10px;flex-wrap:wrap}
+  .btn{
+    appearance:none;font:inherit;font-weight:600;font-size:14px;cursor:pointer;
+    padding:11px 14px;border-radius:10px;border:1px solid var(--line);
+    background:#fff;color:var(--text);flex:1;min-width:130px;transition:background .15s
+  }
+  .btn:active{background:var(--paper)}
+  .btn.primary{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .btn.rec.recording{background:var(--live);color:#fff;border-color:var(--live)}
+  .btn:disabled{opacity:.5;cursor:default}
+  input[type=file]{font:inherit;font-size:13px;width:100%;margin-bottom:10px}
+
+  ul.speakers{list-style:none;margin:6px 0 0;padding:0}
+  ul.speakers li{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:9px 0;border-top:1px solid var(--line);font-size:14px
+  }
+  ul.speakers li:first-child{border-top:none}
+  ul.speakers .n{font-family:"IBM Plex Mono",monospace;color:var(--muted);font-size:12px}
+  .del{border:none;background:none;color:var(--unknown);font:inherit;font-size:13px;cursor:pointer;padding:4px}
+  .empty{color:var(--muted);font-size:13px;padding:6px 0}
+
+  .toast{
+    position:fixed;left:50%;bottom:20px;transform:translateX(-50%) translateY(20px);
+    background:var(--ink);color:#fff;padding:11px 16px;border-radius:10px;font-size:13px;
+    opacity:0;pointer-events:none;transition:.25s;max-width:90vw;text-align:center;z-index:9
+  }
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .toast.err{background:#B4462A}
+  .cfgbar{font-size:12px;color:var(--muted);margin:14px 2px 0;text-align:center}
+  .cfgbar code{font-family:"IBM Plex Mono",monospace}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>VoiceID</h1>
+    <span class="sub">identification de locuteur · phase 1</span>
+  </header>
+
+  <!-- STAGE -->
+  <section class="stage">
+    <div class="label">Résultat</div>
+    <div class="verdict" id="verdict">—</div>
+    <div class="score" id="score">Appuie pour parler (3–5 s)</div>
+    <div class="meter" id="meter"></div>
+    <button class="mic" id="idBtn">Parler pour identifier</button>
+    <div class="timer" id="idTimer"></div>
+  </section>
+
+  <!-- ENRÔLEMENT -->
+  <section class="card">
+    <h2>Enrôler un locuteur</h2>
+    <p class="hint">Par fichier(s), ou directement au micro. Astuce fiabilité : ajoute au moins
+      un échantillon <b>enregistré au micro du téléphone</b> — les mêmes conditions qu'à l'identification.</p>
+    <label class="fld" for="name">Nom</label>
+    <input type="text" id="name" placeholder="ex. Camille" autocomplete="off" />
+
+    <label class="fld">Depuis des fichiers audio</label>
+    <input type="file" id="files" accept="audio/*" multiple />
+    <div class="row">
+      <button class="btn" id="uploadBtn">Enrôler ces fichiers</button>
+    </div>
+
+    <label class="fld" style="margin-top:14px">Au micro</label>
+    <div class="row">
+      <button class="btn rec" id="enrollRecBtn">Enregistrer un échantillon</button>
+    </div>
+    <div class="timer" id="enrollTimer" style="color:var(--muted)"></div>
+  </section>
+
+  <!-- LISTE -->
+  <section class="card">
+    <h2>Locuteurs enrôlés</h2>
+    <ul class="speakers" id="list"><li class="empty">Chargement…</li></ul>
+  </section>
+
+  <div class="cfgbar">serveur : <code id="cfgUrl"></code></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ======================================================================
+//  CONFIG — remplace par l'URL publique de ton service Railway
+// ======================================================================
+const SERVER_URL = "https://TON-APP.up.railway.app";
+
+const MAX_SECONDS = 6;               // coupe l'enregistrement au-delà
+document.getElementById('cfgUrl').textContent = SERVER_URL;
+
+// ---------- utilitaires ----------
+const $ = id => document.getElementById(id);
+function toast(msg, isErr){
+  const t=$('toast'); t.textContent=msg; t.className='toast show'+(isErr?' err':'');
+  clearTimeout(t._h); t._h=setTimeout(()=>t.className='toast',2600);
+}
+function pickMime(){
+  for(const m of ['audio/mp4','audio/webm;codecs=opus','audio/webm','audio/ogg'])
+    if(window.MediaRecorder && MediaRecorder.isTypeSupported(m)) return m;
+  return '';
+}
+
+// ---------- capture micro (partagée identif + enrôlement) ----------
+// getUserMedia avec traitements désactivés pour un signal plus "brut" et surtout
+// COHÉRENT entre enrôlement-micro et identification (iOS peut ignorer ces options).
+const CONSTRAINTS = { audio:{
+  channelCount:1, echoCancellation:false, noiseSuppression:false, autoGainControl:false
+}};
+
+let mediaStream=null;
+async function getStream(){
+  if(mediaStream && mediaStream.active) return mediaStream;
+  mediaStream = await navigator.mediaDevices.getUserMedia(CONSTRAINTS);
+  return mediaStream;
+}
+
+// vumètre : AnalyserNode sur le flux, dessine 24 barres
+let audioCtx=null, analyser=null, meterRAF=null;
+const bars=[];
+(function buildMeter(){
+  const m=$('meter'); for(let i=0;i<24;i++){const b=document.createElement('i');m.appendChild(b);bars.push(b);}
+})();
+function startMeter(stream){
+  audioCtx = audioCtx || new (window.AudioContext||window.webkitAudioContext)();
+  if(audioCtx.state==='suspended') audioCtx.resume();
+  const src=audioCtx.createMediaStreamSource(stream);
+  analyser=audioCtx.createAnalyser(); analyser.fftSize=64;
+  src.connect(analyser);
+  $('meter').classList.add('active');
+  const data=new Uint8Array(analyser.frequencyBinCount);
+  (function loop(){
+    analyser.getByteFrequencyData(data);
+    for(let i=0;i<bars.length;i++){
+      const v=data[i]||0; bars[i].style.height=(6+ (v/255)*40)+'px';
+    }
+    meterRAF=requestAnimationFrame(loop);
+  })();
+}
+function stopMeter(){
+  cancelAnimationFrame(meterRAF);
+  $('meter').classList.remove('active');
+  bars.forEach(b=>b.style.height='6px');
+}
+
+// enregistre jusqu'au stop() ou MAX_SECONDS ; renvoie un Blob
+class Recorder{
+  async start(onTick){
+    const stream=await getStream();
+    startMeter(stream);
+    this.mime=pickMime();
+    this.rec=new MediaRecorder(stream, this.mime?{mimeType:this.mime}:undefined);
+    this.chunks=[];
+    this.rec.ondataavailable=e=>{ if(e.data.size) this.chunks.push(e.data); };
+    this.done=new Promise(res=>{ this.rec.onstop=()=>res(new Blob(this.chunks,{type:this.mime||'audio/mp4'})); });
+    this.rec.start();
+    this.t0=Date.now();
+    this._tick=setInterval(()=>{
+      const s=(Date.now()-this.t0)/1000;
+      onTick && onTick(s);
+      if(s>=MAX_SECONDS) this.stop();
+    },100);
+    return this;
+  }
+  async stop(){
+    if(!this.rec || this.rec.state==='inactive') return this.done;
+    clearInterval(this._tick); stopMeter(); this.rec.stop();
+    return this.done;
+  }
+}
+
+// filename avec bonne extension selon le mime (aide ffmpeg côté serveur)
+function extFor(mime){
+  if(mime.includes('mp4')) return 'm4a';
+  if(mime.includes('webm')) return 'webm';
+  if(mime.includes('ogg')) return 'ogg';
+  return 'bin';
+}
+
+// ---------- appels serveur ----------
+async function apiIdentify(blob){
+  const fd=new FormData();
+  fd.append('file', blob, 'clip.'+extFor(blob.type||'audio/mp4'));
+  const r=await fetch(SERVER_URL+'/identify',{method:'POST',body:fd});
+  if(!r.ok) throw new Error((await r.json()).detail || r.statusText);
+  return r.json();
+}
+async function apiEnroll(name, blobs){
+  const fd=new FormData(); fd.append('speaker',name);
+  blobs.forEach((b,i)=>fd.append('files', b, (b.name||('s'+i))+ (b.name?'':('.'+extFor(b.type||'audio/mp4')))));
+  const r=await fetch(SERVER_URL+'/enroll',{method:'POST',body:fd});
+  const j=await r.json();
+  if(!r.ok) throw new Error((j.detail && j.detail.message) || j.detail || r.statusText);
+  return j;
+}
+async function apiSpeakers(){
+  const r=await fetch(SERVER_URL+'/speakers'); return r.json();
+}
+async function apiDelete(name){
+  await fetch(SERVER_URL+'/speakers/'+encodeURIComponent(name),{method:'DELETE'});
+}
+
+// ---------- IDENTIFICATION (push-to-talk) ----------
+let idRec=null, identifying=false;
+$('idBtn').addEventListener('click', async ()=>{
+  const btn=$('idBtn');
+  if(!identifying){
+    try{
+      identifying=true; btn.textContent='Arrêter'; btn.classList.add('recording');
+      setVerdict('À l\'écoute…','live',''); 
+      idRec=await new Recorder().start(s=>$('idTimer').textContent=s.toFixed(1)+' s');
+    }catch(e){ identifying=false; btn.textContent='Parler pour identifier'; btn.classList.remove('recording'); toast('Micro refusé : '+e.message,true); }
+  }else{
+    btn.disabled=true; btn.textContent='Analyse…';
+    const blob=await idRec.stop(); $('idTimer').textContent='';
+    try{
+      const res=await apiIdentify(blob);
+      const cls=res.is_known?'known':'unknown';
+      const pct=(res.score*100).toFixed(0);
+      setVerdict(res.is_known?res.decision:'Inconnu', cls,
+        `cos ${res.score.toFixed(3)} · seuil ${res.threshold} · ${res.speech_seconds}s de voix`
+        + (res.low_speech?' · ⚠ peu de voix':''));
+    }catch(e){ setVerdict('—','',''); toast('Erreur : '+e.message,true); }
+    finally{ identifying=false; btn.disabled=false; btn.textContent='Parler pour identifier'; btn.classList.remove('recording'); }
+  }
+});
+function setVerdict(text,cls,score){
+  const v=$('verdict'); v.textContent=text; v.className='verdict'+(cls?(' '+cls):'');
+  $('score').textContent=score || 'Appuie pour parler (3–5 s)';
+}
+
+// ---------- ENRÔLEMENT PAR FICHIER ----------
+$('uploadBtn').addEventListener('click', async ()=>{
+  const name=$('name').value.trim(); const files=[...$('files').files];
+  if(!name) return toast('Donne un nom au locuteur.',true);
+  if(!files.length) return toast('Choisis au moins un fichier.',true);
+  const btn=$('uploadBtn'); btn.disabled=true; btn.textContent='Envoi…';
+  try{
+    const j=await apiEnroll(name, files);
+    let msg=`${j.speaker} : ${j.samples_total} échantillon(s).`;
+    if(j.skipped && j.skipped.length) msg+=` ${j.skipped.length} ignoré(s).`;
+    toast(msg); $('files').value=''; refresh();
+  }catch(e){ toast('Échec : '+e.message,true); }
+  finally{ btn.disabled=false; btn.textContent='Enrôler ces fichiers'; }
+});
+
+// ---------- ENRÔLEMENT AU MICRO ----------
+let enRec=null, enrolling=false;
+$('enrollRecBtn').addEventListener('click', async ()=>{
+  const name=$('name').value.trim();
+  if(!name) return toast('Donne d\'abord un nom au locuteur.',true);
+  const btn=$('enrollRecBtn');
+  if(!enrolling){
+    try{
+      enrolling=true; btn.textContent='Arrêter et enrôler'; btn.classList.add('recording');
+      enRec=await new Recorder().start(s=>$('enrollTimer').textContent='enregistrement '+s.toFixed(1)+' s');
+    }catch(e){ enrolling=false; btn.classList.remove('recording'); btn.textContent='Enregistrer un échantillon'; toast('Micro refusé : '+e.message,true); }
+  }else{
+    btn.disabled=true; btn.textContent='Envoi…';
+    const blob=await enRec.stop(); $('enrollTimer').textContent='';
+    try{
+      const j=await apiEnroll(name,[blob]);
+      toast(`${j.speaker} : ${j.samples_total} échantillon(s).`); refresh();
+    }catch(e){ toast('Échec : '+e.message,true); }
+    finally{ enrolling=false; btn.disabled=false; btn.textContent='Enregistrer un échantillon'; btn.classList.remove('recording'); }
+  }
+});
+
+// ---------- LISTE ----------
+async function refresh(){
+  try{
+    const {speakers}=await apiSpeakers();
+    const names=Object.keys(speakers||{});
+    const ul=$('list');
+    if(!names.length){ ul.innerHTML='<li class="empty">Personne pour l\'instant.</li>'; return; }
+    ul.innerHTML='';
+    names.forEach(n=>{
+      const li=document.createElement('li');
+      li.innerHTML=`<span>${n} <span class="n">${speakers[n]} éch.</span></span>`;
+      const d=document.createElement('button'); d.className='del'; d.textContent='supprimer';
+      d.onclick=async()=>{ if(confirm('Supprimer '+n+' ?')){ await apiDelete(n); refresh(); } };
+      li.appendChild(d); ul.appendChild(li);
+    });
+  }catch(e){ $('list').innerHTML='<li class="empty">Serveur injoignable. Vérifie SERVER_URL.</li>'; }
+}
+refresh();
+</script>
+</body>
+</html>
