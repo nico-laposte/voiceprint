@@ -61,6 +61,13 @@
   .mic.recording{background:var(--live);color:#fff}
   .mic:disabled{opacity:.5;cursor:default}
   .timer{font-family:"IBM Plex Mono",monospace;font-size:12px;color:#8A90A0;margin-top:10px;min-height:16px}
+  .orfile{margin-top:14px;padding-top:14px;border-top:1px solid #2A2E38}
+  .orfile span{display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#8A90A0;margin-bottom:8px}
+  .orfile input[type=file]{font:inherit;font-size:12px;color:#B7BCC8;width:100%}
+  .orfile input[type=file]::-webkit-file-upload-button{
+    font:inherit;font-size:12px;font-weight:600;cursor:pointer;margin-right:10px;
+    padding:8px 12px;border-radius:9px;border:1px solid #333846;background:#22262F;color:#fff
+  }
 
   /* --- Cartes --- */
   .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:18px;margin-top:16px}
@@ -120,6 +127,10 @@
     <div class="meter" id="meter"></div>
     <button class="mic" id="idBtn">Parler pour identifier</button>
     <div class="timer" id="idTimer"></div>
+    <div class="orfile">
+      <span>ou depuis un fichier / une vidéo</span>
+      <input type="file" id="idFile" accept="audio/*,video/*" />
+    </div>
   </section>
 
   <!-- ENRÔLEMENT -->
@@ -158,7 +169,7 @@
 // ======================================================================
 //  CONFIG — remplace par l'URL publique de ton service Railway
 // ======================================================================
-const SERVER_URL = "https://voiceprint-production.up.railway.app";
+const SERVER_URL = "https://TON-APP.up.railway.app";
 
 const MAX_SECONDS = 6;               // coupe l'enregistrement au-delà
 document.getElementById('cfgUrl').textContent = SERVER_URL;
@@ -252,9 +263,9 @@ function extFor(mime){
 }
 
 // ---------- appels serveur ----------
-async function apiIdentify(blob){
+async function apiIdentify(blob, filename){
   const fd=new FormData();
-  fd.append('file', blob, 'clip.'+extFor(blob.type||'audio/mp4'));
+  fd.append('file', blob, filename || ('clip.'+extFor(blob.type||'audio/mp4')));
   const r=await fetch(SERVER_URL+'/identify',{method:'POST',body:fd});
   if(!r.ok) throw new Error((await r.json()).detail || r.statusText);
   return r.json();
@@ -289,19 +300,33 @@ $('idBtn').addEventListener('click', async ()=>{
     const blob=await idRec.stop(); $('idTimer').textContent='';
     try{
       const res=await apiIdentify(blob);
-      const cls=res.is_known?'known':'unknown';
-      const pct=(res.score*100).toFixed(0);
-      setVerdict(res.is_known?res.decision:'Inconnu', cls,
-        `cos ${res.score.toFixed(3)} · seuil ${res.threshold} · ${res.speech_seconds}s de voix`
-        + (res.low_speech?' · ⚠ peu de voix':''));
+      showResult(res);
     }catch(e){ setVerdict('—','',''); toast('Erreur : '+e.message,true); }
     finally{ identifying=false; btn.disabled=false; btn.textContent='Parler pour identifier'; btn.classList.remove('recording'); }
   }
 });
+function showResult(res){
+  const cls=res.is_known?'known':'unknown';
+  setVerdict(res.is_known?res.decision:'Inconnu', cls,
+    `cos ${res.score.toFixed(3)} · seuil ${res.threshold} · ${res.speech_seconds}s de voix`
+    + (res.low_speech?' · ⚠ peu de voix':''));
+}
 function setVerdict(text,cls,score){
   const v=$('verdict'); v.textContent=text; v.className='verdict'+(cls?(' '+cls):'');
   $('score').textContent=score || 'Appuie pour parler (3–5 s)';
 }
+
+// ---------- IDENTIFICATION DEPUIS UN FICHIER / UNE VIDÉO ----------
+// ffmpeg (côté serveur) extrait la piste audio de la vidéo : aucun traitement ici.
+$('idFile').addEventListener('change', async (e)=>{
+  const file=e.target.files[0]; if(!file) return;
+  setVerdict('Analyse…','live', file.name);
+  try{
+    const res=await apiIdentify(file, file.name);
+    showResult(res);
+  }catch(err){ setVerdict('—','',''); toast('Erreur : '+err.message,true); }
+  finally{ e.target.value=''; }   // permet de relancer le même fichier
+});
 
 // ---------- ENRÔLEMENT PAR FICHIER ----------
 $('uploadBtn').addEventListener('click', async ()=>{
