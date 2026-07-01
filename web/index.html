@@ -250,7 +250,9 @@ async function startListening() {
     } catch (e) {
       return;
     }
-    if (data.status === "silence") {
+    if (data.status === "ok") {
+      setStatus(`Buffer: ${data.buffer}/${data.needed} samples`);
+    } else if (data.status === "silence") {
       setDisplay("idle", null, 0);
     } else if (data.status === "error") {
       setStatus("Erreur serveur : " + (data.detail || "inconnue"));
@@ -262,14 +264,16 @@ async function startListening() {
   };
 
   workletNode.port.onmessage = (event) => {
-    if (ws.readyState !== WebSocket.OPEN) return;
+    const state = ws ? ws.readyState : "null";
+    if (ws.readyState !== WebSocket.OPEN) {
+      setStatus(`WebSocket non ouvert: readyState=${state}`);
+      return;
+    }
     const resampled = resampleTo16k(event.data, nativeSampleRate);
     ws.send(resampled.buffer);
     chunkCount++;
-    // Affiche le nombre de chunks envoyés toutes les 10 trames pour confirmer
-    // que l'AudioWorklet capture bien (disparaît dès qu'un résultat arrive)
     if (chunkCount % 10 === 0) {
-      setStatus(`Connecté — ${chunkCount} trames envoyées (AudioContext: ${audioContext.state})`);
+      setStatus(`Envoi chunk #${chunkCount}, readyState=${state}, bytes=${resampled.buffer.byteLength}`);
     }
   };
 
