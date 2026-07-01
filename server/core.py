@@ -61,9 +61,14 @@ class AudioProcessor:
         self,
         model_dir: str = "/tmp/ecapa",
         min_speech_seconds: float = 1.0,
+        max_speech_seconds: float = 30.0,
         vad_threshold: float = 0.5,
     ) -> None:
         self.min_speech_seconds = min_speech_seconds
+        # Au-delà, on ne garde que les premières N secondes de VOIX : un embedding
+        # est stable dès ~2-3 s, inutile d'en moyenner 3 minutes — et ça protège la
+        # RAM/CPU quand on identifie depuis une longue vidéo ou un long audio.
+        self.max_speech_seconds = max_speech_seconds
         self.vad_threshold = vad_threshold
 
         # ECAPA-TDNN (SpeechBrain). Téléchargé une fois au premier boot.
@@ -157,6 +162,12 @@ class AudioProcessor:
             speech, seconds, low = wav, len(wav) / SAMPLE_RATE, True
         else:
             low = seconds < 2.0  # ECAPA aime ~2-3 s : en dessous, embedding moins stable
+
+        # Plafond : on ne garde que les premières N s de voix (fichiers/vidéos longs).
+        max_samples = int(self.max_speech_seconds * SAMPLE_RATE)
+        if speech.shape[0] > max_samples:
+            speech = speech[:max_samples]
+            seconds = self.max_speech_seconds
 
         vec = self._encode(speech)
         return Embedding(vector=vec, speech_seconds=seconds, low_speech=low)
