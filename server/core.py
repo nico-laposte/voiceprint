@@ -95,10 +95,18 @@ class AudioProcessor:
 
     def decode(self, raw: bytes) -> np.ndarray:
         """N'importe quel conteneur -> float32 mono 16 kHz dans [-1, 1] via ffmpeg."""
+        if not raw:
+            raise ValueError(
+                "Fichier vide (0 octet). Sur iPhone, si le fichier est dans iCloud, "
+                "ouvre-le d'abord dans l'app Fichiers pour le télécharger localement."
+            )
+
         proc = subprocess.run(
             [
-                "ffmpeg", "-hide_banner", "-loglevel", "error",
+                "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
                 "-i", "pipe:0",
+                "-vn",                       # ignore toute piste vidéo
+                "-map", "0:a:0?",            # première piste audio si elle existe
                 "-f", "f32le", "-acodec", "pcm_f32le",
                 "-ac", "1", "-ar", str(SAMPLE_RATE),
                 "pipe:1",
@@ -107,14 +115,19 @@ class AudioProcessor:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
+        err = proc.stderr.decode("utf-8", "ignore").strip()
+        tail = err.splitlines()[-1] if err else ""
+
         if proc.returncode != 0:
-            raise ValueError(
-                "Décodage audio impossible. "
-                "Le fichier est vide ou dans un format que ffmpeg n'a pas su lire."
-            )
+            raise ValueError(f"Décodage ffmpeg impossible. Détail : {tail or 'inconnu'}")
+
         wav = np.frombuffer(proc.stdout, dtype=np.float32).copy()
         if wav.size == 0:
-            raise ValueError("Le fichier audio décodé est vide.")
+            raise ValueError(
+                "Aucune piste audio exploitable dans ce fichier. "
+                + (f"Détail ffmpeg : {tail}" if tail else
+                   "Le fichier ne contient peut-être que de la vidéo, ou est tronqué.")
+            )
         return wav
 
     def apply_vad(self, wav: np.ndarray) -> tuple[np.ndarray, float]:
