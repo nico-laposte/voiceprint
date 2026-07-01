@@ -35,7 +35,7 @@ ALLOW_ORIGINS = os.environ.get("ALLOW_ORIGINS", "*").split(",")
 
 os.makedirs(DATA_DIR, exist_ok=True)
 
-app = FastAPI(title="VoiceID — Phase 1 (POST)")
+app = FastAPI(title="VoicePrint — Phase 1 (POST)")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOW_ORIGINS,
