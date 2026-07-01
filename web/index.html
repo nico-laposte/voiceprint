@@ -320,6 +320,7 @@ function setVerdict(text,cls,score){
 // ffmpeg (côté serveur) extrait la piste audio de la vidéo : aucun traitement ici.
 $('idFile').addEventListener('change', async (e)=>{
   const file=e.target.files[0]; if(!file) return;
+  if(file.size===0){ e.target.value=''; return toast('Fichier vide (0 octet). S\'il est dans iCloud, ouvre-le d\'abord dans Fichiers pour le télécharger.',true); }
   setVerdict('Analyse…','live', file.name);
   try{
     const res=await apiIdentify(file, file.name);
@@ -330,9 +331,14 @@ $('idFile').addEventListener('change', async (e)=>{
 
 // ---------- ENRÔLEMENT PAR FICHIER ----------
 $('uploadBtn').addEventListener('click', async ()=>{
-  const name=$('name').value.trim(); const files=[...$('files').files];
+  const name=$('name').value.trim(); let files=[...$('files').files];
   if(!name) return toast('Donne un nom au locuteur.',true);
   if(!files.length) return toast('Choisis au moins un fichier.',true);
+  const empties=files.filter(f=>f.size===0);
+  files=files.filter(f=>f.size>0);
+  if(empties.length && !files.length)
+    return toast('Fichier(s) vide(s). Dans iCloud ? Ouvre-les d\'abord dans Fichiers pour les télécharger.',true);
+  if(empties.length) toast(empties.length+' fichier(s) vide(s) ignoré(s).',true);
   const btn=$('uploadBtn'); btn.disabled=true; btn.textContent='Envoi…';
   try{
     const j=await apiEnroll(name, files);
