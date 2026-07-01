@@ -1,13 +1,3 @@
-"""
-Serveur principal.
-
-- POST /enroll : enrôle une personne à partir d'un fichier audio
-- GET  /speakers : liste les personnes enrôlées
-- DELETE /speakers/{name} : supprime une personne
-- WS   /ws/identify : flux audio live -> identification en continu
-- GET  /health : healthcheck Railway
-"""
-
 import collections
 import subprocess
 import tempfile
@@ -22,13 +12,7 @@ from speaker_id import SpeakerIdentifier, SAMPLE_RATE
 from vad import VoiceActivityDetector
 
 app = FastAPI()
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 identifier = SpeakerIdentifier()
 vad = VoiceActivityDetector(aggressiveness=2)
@@ -93,25 +77,34 @@ async def delete_speaker(name: str):
 @app.websocket("/ws/identify")
 async def ws_identify(websocket: WebSocket):
     await websocket.accept()
+    print("[WS] connexion acceptée")
     buffer = np.zeros(0, dtype=np.float32)
     recent_results = collections.deque(maxlen=SMOOTHING_WINDOW)
+    chunk_count = 0
 
     try:
         while True:
             message = await websocket.receive()
             raw = message.get("bytes") or b""
             if not raw:
+                print(f"[WS] message vide ignoré, type={message.get('type')}")
                 continue
+
             chunk = np.frombuffer(raw, dtype=np.float32)
             buffer = np.concatenate([buffer, chunk])
+            chunk_count += 1
+            print(f"[WS] chunk #{chunk_count}: {len(chunk)} samples, buffer total: {len(buffer)}/{WINDOW_SAMPLES}")
 
             while len(buffer) >= WINDOW_SAMPLES:
                 window = buffer[:WINDOW_SAMPLES]
                 buffer = buffer[HOP_SAMPLES:]
+                print(f"[WS] fenêtre prête, lancement VAD...")
 
                 try:
                     has_voice = vad.has_speech(window)
-                except Exception:
+                    print(f"[WS] VAD: {'voix' if has_voice else 'silence'}")
+                except Exception as e:
+                    print(f"[WS] erreur VAD: {e}")
                     has_voice = True
 
                 if not has_voice:
@@ -119,9 +112,12 @@ async def ws_identify(websocket: WebSocket):
                     await websocket.send_json({"status": "silence"})
                     continue
 
+                print(f"[WS] lancement ECAPA...")
                 try:
                     result = identifier.identify(window, threshold=SIMILARITY_THRESHOLD)
+                    print(f"[WS] ECAPA terminé: name={result['name']} score={result['score']:.3f}")
                 except Exception as e:
+                    print(f"[WS] erreur ECAPA: {e}")
                     await websocket.send_json({"status": "error", "detail": str(e)})
                     continue
 
@@ -138,6 +134,8 @@ async def ws_identify(websocket: WebSocket):
                 })
 
     except WebSocketDisconnect:
-        print("[ws_identify] client déconnecté")
+        print(f"[WS] client déconnecté après {chunk_count} chunks")
     except Exception as e:
-        print(f"[ws_identify] erreur: {e}")
+        import traceback
+        print(f"[WS] ERREUR: {e}")
+        print(traceback.format_exc())
